@@ -1,134 +1,142 @@
-let express=require("express");
-let path=require("path")
-let {open}=require("sqlite")
-let sqlite3=require("sqlite3")
-let app=express()
-const jwt = require('jsonwebtoken')
-app.use(express.json())
-const cors = require("cors")
+const express = require("express");
+const cors = require("cors");
+const jwt = require("jsonwebtoken");
+const mysql = require("mysql2/promise");
+
+const app = express();
+app.use(express.json());
 app.use(cors());
-let dbPath=path.join(__dirname,"UserData.db") 
-let db = null;
+
+// --------------------------------------
+// 1. MySQL Connection
+// --------------------------------------
+let db;
 
 const initializeDBAndServer = async () => {
   try {
-    db = await open({
-      filename: dbPath,
-      driver: sqlite3.Database,
+    db = await mysql.createConnection({
+      host: "localhost",     // change if needed
+      user: "user",          // your MySQL user
+      password: "123654",  // your MySQL password
+      database: "myapp"   // your DB name
     });
-    
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS USER(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL,
-        email TEXT NOT NULL,
-        password TEXT NOT NULL
-        )`);
+
+    console.log("MySQL Connected");
+
+    // Create table if not exists
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS USER (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(100) NOT NULL,
+        email VARCHAR(100) NOT NULL UNIQUE,
+        password VARCHAR(100) NOT NULL
+      )
+    `);
+
     app.listen(3000, () => {
-      console.log("Server Running at http://localhost:3000/");
+      console.log("Server running at http://localhost:3000/");
     });
-  } catch (e) {
-    console.log(`DB Error: ${e.message}`);
+
+  } catch (err) {
+    console.log("DB Error:", err.message);
     process.exit(1);
   }
 };
 
 initializeDBAndServer();
-app.post("/register",async (req,res)=>{
-    let details=req.body 
-    let {password,email,username}=details
-    console.log(password)
-    if (password==="" || email==="" || username===""){
-       res.status(200).json({
-        status:"400",
-        message:"All the fieldes are required"
-    })
-    return 0
-    }
-    try{ 
-       console.log("harsha")
-       
-       const query=`SELECT * FROM USER WHERE email='${email}'`
-       const logindata=await db.get(query)
-       
-       console.log(logindata)
-        
-       if (logindata===undefined){
 
-       let insertQuery=`INSERT INTO USER (username,email,password) VALUES ('${username}','${email}','${password}')`  
-       let data=await db.run(insertQuery)
-       res.status(200).json({
-        status:"success",
-        message:"register successfull",
-        })
-      }
-      else{
-      res.status(200).json({
-        status:"failure",
-        message:"user already registered"
-        })
-    }   
-    }
-    catch(err){
-      res.status(401).json({
-        message:err.message,
-        status:"failurehj"
-      })
-    }
-   
-})
-app.post("/login",async (req ,res)=>{
-   let {email,password}=req.body 
-   if (email==="" || password===""){
-     res.status(200).json({
-        status:"400",
-        message:"All the fieldes are required"
-    })
-    return 0
+// --------------------------------------
+// REGISTER API
+// --------------------------------------
+app.post("/register", async (req, res) => {
+  const { username, email, password } = req.body;
+
+  if (!username || !email || !password) {
+    return res.json({
+      status: "400",
+      message: "All fields are required"
+    });
   }
-   try{
-   let loginquery=`SELECT * FROM USER WHERE email='${email}'`
-   const data=await db.get(loginquery)
-   //console.log(data)
 
-   if (data===undefined){
-    res.status(200).json({
-        status:"200",
-        message:"no user found"
-    })
-   }
-    
-   
-   else{
-    //console.log(data)
-    console.log(data.password,password)
-    
-   
-    if(data.password===password){
-        let payload={email:email}
-        let jwttoken=jwt.sign(payload,"my_security_key")
-        console.log("hello",jwttoken)
-      res.status(200).json({
-        status:"200",
-        message:"login successful",
-        token:jwttoken,
-        ok:true
-    })
+  try {
+    const [rows] = await db.execute(
+      `SELECT * FROM USER WHERE email = ?`,
+      [email]
+    );
+
+    if (rows.length > 0) {
+      return res.json({
+        status: "failure",
+        message: "User already registered"
+      });
     }
-    else{
-         res.status(200).json({
-        status:"200",
-        message:"password incorrect"
-    })
+
+    await db.execute(
+      `INSERT INTO USER (username, email, password) VALUES (?, ?, ?)`,
+      [username, email, password]
+    );
+
+    res.json({
+      status: "success",
+      message: "Register successful"
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      status: "failure",
+      message: err.message
+    });
+  }
+});
+
+// --------------------------------------
+// LOGIN API
+// --------------------------------------
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
+  console.log(email,password)
+  if (email===undefined || password===undefined) {
+    return res.json({
+      status: "400",
+      message: "All fields are required"
+    });
+  }
+
+  try {
+    const [rows] = await db.execute(
+      `SELECT * FROM USER WHERE email = ?`,
+      [email]
+    );
+
+    if (rows.length === 0) {
+      return res.json({
+        status: "200",
+        message: "No user found"
+      });
     }
-    
-   }
-   }catch(err){
-        console.log(err.message)
-         res.status(200).json({
-        status:"failure to login",
-        message:err.messge
-    })
+
+    const user = rows[0];
+
+    if (user.password !== password) {
+      return res.json({
+        status: "200",
+        message: "Password incorrect"
+      });
     }
-   
-})
+
+    const token = jwt.sign({ email: user.email }, "my_security_key");
+
+    res.json({
+      status: "200",
+      message: "Login successful",
+      token: token,
+      ok: true
+    });
+
+  } catch (err) {
+    res.status(500).json({
+      status: "failure",
+      message: err.message
+    });
+  }
+});
