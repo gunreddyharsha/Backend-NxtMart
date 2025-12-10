@@ -1,7 +1,9 @@
 const express = require("express");
 const cors = require("cors");
+const dotenv=require("dotenv")
+dotenv.config()
 const jwt = require("jsonwebtoken");
-const mysql = require("mysql2/promise");
+const mongoose=require("mongoose")
 
 const app = express();
 app.use(express.json());
@@ -11,43 +13,21 @@ app.use(cors());
 // 1. MySQL Connection
 // --------------------------------------
 let db;
+let {DB_PASSWORD,PORT,DB_USER}=process.env
+let dbUrl=`mongodb+srv://${DB_USER}:${DB_PASSWORD}@cluster0.2hwwh7w.mongodb.net/?appName=Cluster0`
 
-const initializeDBAndServer = async () => {
-  try {
-    db = await mysql.createConnection({
-      host: "localhost",     // change if needed
-      user: "user",          // your MySQL user
-      password: "123654",  // your MySQL password
-      database: "myapp"   // your DB name
-    });
+mongoose.connect(dbUrl).then(function(response){
+  console.log(" Connection Successful")
+}).catch(err=>console.log(err))
 
-    console.log("MySQL Connected");
+const userSchema = new mongoose.Schema({
+  username: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true }
+});
 
-    // Create table if not exists
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS USER (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        username VARCHAR(100) NOT NULL,
-        email VARCHAR(100) NOT NULL UNIQUE,
-        password VARCHAR(100) NOT NULL
-      )
-    `);
+const User = mongoose.model("User", userSchema);
 
-    app.listen(3000, () => {
-      console.log("Server running at http://localhost:3000/");
-    });
-
-  } catch (err) {
-    console.log("DB Error:", err.message);
-    process.exit(1);
-  }
-};
-
-initializeDBAndServer();
-
-// --------------------------------------
-// REGISTER API
-// --------------------------------------
 app.post("/register", async (req, res) => {
   const { username, email, password } = req.body;
 
@@ -59,22 +39,17 @@ app.post("/register", async (req, res) => {
   }
 
   try {
-    const [rows] = await db.execute(
-      `SELECT * FROM USER WHERE email = ?`,
-      [email]
-    );
+    const existingUser = await User.findOne({ email });
 
-    if (rows.length > 0) {
+    if (existingUser) {
       return res.json({
         status: "failure",
         message: "User already registered"
       });
     }
 
-    await db.execute(
-      `INSERT INTO USER (username, email, password) VALUES (?, ?, ?)`,
-      [username, email, password]
-    );
+    const newUser = new User({ username, email, password });
+    await newUser.save();
 
     res.json({
       status: "success",
@@ -89,13 +64,13 @@ app.post("/register", async (req, res) => {
   }
 });
 
-// --------------------------------------
+// ------------------------------------------------------
 // LOGIN API
-// --------------------------------------
+// ------------------------------------------------------
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
-  console.log(email,password)
-  if (email===undefined || password===undefined) {
+
+  if (!email || !password) {
     return res.json({
       status: "400",
       message: "All fields are required"
@@ -103,19 +78,14 @@ app.post("/login", async (req, res) => {
   }
 
   try {
-    const [rows] = await db.execute(
-      `SELECT * FROM USER WHERE email = ?`,
-      [email]
-    );
+    const user = await User.findOne({ email });
 
-    if (rows.length === 0) {
+    if (!user) {
       return res.json({
         status: "200",
         message: "No user found"
       });
     }
-
-    const user = rows[0];
 
     if (user.password !== password) {
       return res.json({
@@ -140,3 +110,7 @@ app.post("/login", async (req, res) => {
     });
   }
 });
+
+app.listen(PORT, () => {
+      console.log("Server running at http://localhost:3000/");
+    })
