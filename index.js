@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(cors());
 
 // --------------------------------------
-// 1. MySQL Connection
+// 1. Mongoose Connection
 // --------------------------------------
 let db;
 let {DB_PASSWORD,PORT,DB_USER}=process.env
